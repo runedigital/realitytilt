@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>RUNE // HARDWARE LINK</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; }
+        #perm-btn {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            padding: 20px 40px; background: #00ffea; color: #000;
+            font-family: monospace; font-size: 1.5rem; border: none; border-radius: 10px;
+            box-shadow: 0 0 30px #00ffea; z-index: 10;
+        }
+        #debug {
+            position: absolute; top: 20px; left: 20px; color: #00ffea; font-family: monospace;
+            pointer-events: none; z-index: 5;
+        }
+    </style>
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+</head>
+<body>
+
+    <button id="perm-btn">INITIALIZE SENSORS</button>
+    <div id="debug">WAITING FOR LINK...</div>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // 1. SETUP
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 5;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // 2. THE "LIQUID" (A Cube of particles)
+        const count = 5000;
+        const geometry = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+        const material = new THREE.MeshBasicMaterial({ color: 0x00ffea });
+        const mesh = new THREE.InstancedMesh(geometry, material, count);
+        
+        const dummy = new THREE.Object3D();
+        const particles = [];
+
+        for(let i=0; i<count; i++) {
+            particles.push({
+                x: (Math.random()-0.5)*4,
+                y: (Math.random()-0.5)*4,
+                z: (Math.random()-0.5)*4,
+                vx: 0, vy: 0, vz: 0
+            });
+        }
+        scene.add(mesh);
+
+        // 3. SENSOR LOGIC
+        // Gravity Vector (Defaults to down)
+        let gx = 0, gy = -9.8, gz = 0;
+
+        function handleMotion(event) {
+            // Get Physics data from the phone hardware
+            const acc = event.accelerationIncludingGravity;
+            if(acc) {
+                // Invert axes because phone coords are different from 3D world coords
+                gx = -acc.x; 
+                gy = -acc.y; 
+                gz = acc.z; 
+                document.getElementById('debug').innerText = 
+                    `X: ${gx.toFixed(2)} Y: ${gy.toFixed(2)} Z: ${gz.toFixed(2)}`;
+            }
+        }
+
+        // iOS 13+ requires explicit permission for sensors
+        document.getElementById('perm-btn').addEventListener('click', () => {
+            if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                DeviceMotionEvent.requestPermission()
+                    .then(response => {
+                        if (response == 'granted') {
+                            window.addEventListener('devicemotion', handleMotion);
+                            document.getElementById('perm-btn').style.display = 'none';
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                // Android / Non-iOS 13+
+                window.addEventListener('devicemotion', handleMotion);
+                document.getElementById('perm-btn').style.display = 'none';
+            }
+        });
+
+        // 4. PHYSICS LOOP
+        function animate() {
+            requestAnimationFrame(animate);
+
+            for(let i=0; i<count; i++) {
+                const p = particles[i];
+                
+                // Apply Real-World Gravity to Virtual Particles
+                p.vx += gx * 0.002;
+                p.vy += gy * 0.002;
+                
+                // Friction
+                p.vx *= 0.98;
+                p.vy *= 0.98;
+
+                p.x += p.vx;
+                p.y += p.vy;
+
+                // Glass Box Bounds (Phone Screen)
+                if(p.x > 2) { p.x = 2; p.vx *= -0.5; }
+                if(p.x < -2) { p.x = -2; p.vx *= -0.5; }
+                if(p.y > 4) { p.y = 4; p.vy *= -0.5; }
+                if(p.y < -4) { p.y = -4; p.vy *= -0.5; }
+
+                dummy.position.set(p.x, p.y, 0);
+                dummy.updateMatrix();
+                mesh.setMatrixAt(i, dummy.matrix);
+            }
+            mesh.instanceMatrix.needsUpdate = true;
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+    </script>
+</body>
+</html>
